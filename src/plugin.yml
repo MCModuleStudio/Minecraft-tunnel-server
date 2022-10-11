@@ -1,0 +1,4 @@
+name: MinecraftTunnel
+main: org.mcmodule.tunnel.MinecraftTunnel
+version: 1
+depend: [ProtocolLib]
