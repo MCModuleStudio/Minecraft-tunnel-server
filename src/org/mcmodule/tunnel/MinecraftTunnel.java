@@ -1,7 +1,6 @@
 package org.mcmodule.tunnel;
 
-import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
+import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -25,12 +24,18 @@ public class MinecraftTunnel extends JavaPlugin implements PacketListener  {
 	public MinecraftTunnel() {}
 	
 	private ProtocolManager protocolManager;
+	private ConnectionManager manager;
 	private static final ListeningWhitelist list = ListeningWhitelist.newBuilder().normal().types(PacketType.Play.Client.CUSTOM_PAYLOAD).gamePhase(GamePhase.PLAYING).build();
 	
 	public void onEnable() {
 		protocolManager = ProtocolLibrary.getProtocolManager();
 		protocolManager.addPacketListener(this);
-		
+		try {
+			this.manager = new ConnectionManager(this);
+			manager.start();
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		}
 	}
 	
 	private void sendConnectionStatus(ConnectionStatus connectionStatus, String status) {
@@ -94,7 +99,7 @@ public class MinecraftTunnel extends JavaPlugin implements PacketListener  {
 					}
 					case "data": {
 						long id = buf.readLong();
-						
+						manager.writeData(manager.getConnectionStatus(id), buf);
 					}
 					}
 				}
