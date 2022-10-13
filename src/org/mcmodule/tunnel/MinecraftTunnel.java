@@ -1,10 +1,12 @@
 package org.mcmodule.tunnel;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -44,6 +46,11 @@ public class MinecraftTunnel extends JavaPlugin implements PacketListener  {
 		ByteBuf buf = (ByteBuf) MinecraftReflection.getPacketDataSerializer(8);
 		buf.writeLong(connectionStatus.id);
 		packet.getModifier().write(1, buf);
+		try {
+			protocolManager.sendServerPacket(connectionStatus.player, packet);
+		} catch (InvocationTargetException e) {
+			e.printStackTrace();
+		}
 	}
 	
 	public void sendCloseConnection(ConnectionStatus status) {
@@ -65,6 +72,42 @@ public class MinecraftTunnel extends JavaPlugin implements PacketListener  {
 		buf.writeLong(status.id);
 		buf.writeBytes(buffer);
 		packet.getModifier().write(1, buf);
+		try {
+			protocolManager.sendServerPacket(status.player, packet);
+		} catch (InvocationTargetException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	public void sendConnectFailed(Player player, String message, long tmpid) {
+		PacketContainer packet = protocolManager.createPacket(PacketType.Play.Client.CUSTOM_PAYLOAD);
+		packet.getStrings().write(0, "tunnel-failed");
+		byte[] data = message.getBytes(StandardCharsets.UTF_8);
+		int length = data.length;
+		ByteBuf buf = (ByteBuf) MinecraftReflection.getPacketDataSerializer(8 + 4 + length);
+		buf.writeLong(tmpid);
+		buf.writeInt(length);
+		buf.writeBytes(data);
+		packet.getModifier().write(1, buf);
+		try {
+			protocolManager.sendServerPacket(player, packet);
+		} catch (InvocationTargetException e) {
+			e.printStackTrace();
+		}
+	}
+
+	public void sendConnected(ConnectionStatus status, long tmpid) {
+		PacketContainer packet = protocolManager.createPacket(PacketType.Play.Client.CUSTOM_PAYLOAD);
+		packet.getStrings().write(0, "tunnel-failed");
+		ByteBuf buf = (ByteBuf) MinecraftReflection.getPacketDataSerializer(8 + 8);
+		buf.writeLong(tmpid);
+		buf.writeLong(status.id);
+		packet.getModifier().write(1, buf);
+		try {
+			protocolManager.sendServerPacket(status.player, packet);
+		} catch (InvocationTargetException e) {
+			e.printStackTrace();
+		}
 	}
 
 	@Override
@@ -94,8 +137,11 @@ public class MinecraftTunnel extends JavaPlugin implements PacketListener  {
 					switch(command) {
 					case "connect": {
 						byte[] data = getByteBufArray(buf);
-						String ip = new String(data, 2, data.length - 2, StandardCharsets.ISO_8859_1.name());
-						int port = (data[0] & 0xFF) << 8 | (data[1] & 0xFF) << 0; // 大端
+						String ip = new String(data, 10, data.length - 10, StandardCharsets.ISO_8859_1.name()); // 谁寄吧用中文域名啊
+						long tmpid = (data[0] & 0xFF) << 56 | (data[1] & 0xFF) << 48 | (data[2] & 0xFF) << 40 | (data[3] & 0xFF) << 32 |
+									 (data[4] & 0xFF) << 24 | (data[5] & 0xFF) << 16 | (data[6] & 0xFF) <<  8 | (data[7] & 0xFF) <<  0;
+						int port = (data[8] & 0xFF) << 8 | (data[9] & 0xFF) << 0; // 大端
+						manager.connect(event.getPlayer(), tmpid, ip, port);
 					}
 					case "data": {
 						long id = buf.readLong();
@@ -115,14 +161,5 @@ public class MinecraftTunnel extends JavaPlugin implements PacketListener  {
 
 	@Override
 	public void onPacketSending(PacketEvent arg0) {}
-	
-	private static final Method ARRAY_METHOD;
-    static {
-        try {
-            ARRAY_METHOD = Class.forName("io.netty.buffer.UnpooledHeapByteBuf").getMethod("array");
-        } catch (NoSuchMethodException | ClassNotFoundException ex) {
-            throw new RuntimeException(ex);
-        }
-    }
 
 }
