@@ -58,7 +58,8 @@ public class ConnectionManager extends Thread {
 					if(key.isWritable() && status.writable) {
 						byte[] data = status.outgoingData.poll();
 						if(data != null) {
-							buffer.clear().put(data).flip();
+							buffer.clear();
+							buffer.put(data).flip();
 							WritableByteChannel channel = (WritableByteChannel) key.channel();
 							do {
 								if(channel.write(buffer) == 0) { // Not writable???

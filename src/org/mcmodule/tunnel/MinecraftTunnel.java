@@ -98,7 +98,7 @@ public class MinecraftTunnel extends JavaPlugin implements PacketListener  {
 
 	public void sendConnected(ConnectionStatus status, long tmpid) {
 		PacketContainer packet = protocolManager.createPacket(PacketType.Play.Client.CUSTOM_PAYLOAD);
-		packet.getStrings().write(0, "tunnel-failed");
+		packet.getStrings().write(0, "tunnel-success");
 		ByteBuf buf = (ByteBuf) MinecraftReflection.getPacketDataSerializer(8 + 8);
 		buf.writeLong(tmpid);
 		buf.writeLong(status.id);
