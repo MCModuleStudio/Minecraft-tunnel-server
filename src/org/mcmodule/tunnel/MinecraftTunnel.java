@@ -21,6 +21,7 @@ import com.comphenix.protocol.injector.GamePhase;
 import com.comphenix.protocol.utility.MinecraftReflection;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 
 public class MinecraftTunnel extends JavaPlugin implements PacketListener  {
 	public MinecraftTunnel() {}
@@ -40,12 +41,16 @@ public class MinecraftTunnel extends JavaPlugin implements PacketListener  {
 		}
 	}
 	
+	public void onDisable() {
+		protocolManager.removePacketListeners(this);
+	}
+	
 	private void sendConnectionStatus(ConnectionStatus connectionStatus, String status) {
-		PacketContainer packet = protocolManager.createPacket(PacketType.Play.Client.CUSTOM_PAYLOAD);
+		PacketContainer packet = protocolManager.createPacket(PacketType.Play.Server.CUSTOM_PAYLOAD);
 		packet.getStrings().write(0, "tunnel-" + status);
-		ByteBuf buf = (ByteBuf) MinecraftReflection.getPacketDataSerializer(8);
+		ByteBuf buf = Unpooled.buffer(8);
 		buf.writeLong(connectionStatus.id);
-		packet.getModifier().write(1, buf);
+		packet.getModifier().write(1, MinecraftReflection.getPacketDataSerializer(buf));
 		try {
 			protocolManager.sendServerPacket(connectionStatus.player, packet);
 		} catch (InvocationTargetException e) {
@@ -66,12 +71,12 @@ public class MinecraftTunnel extends JavaPlugin implements PacketListener  {
 	}
 	
 	public void sendData(ConnectionStatus status, ByteBuffer buffer) {
-		PacketContainer packet = protocolManager.createPacket(PacketType.Play.Client.CUSTOM_PAYLOAD);
+		PacketContainer packet = protocolManager.createPacket(PacketType.Play.Server.CUSTOM_PAYLOAD);
 		packet.getStrings().write(0, "tunnel-data");
-		ByteBuf buf = (ByteBuf) MinecraftReflection.getPacketDataSerializer(8 + buffer.remaining());
+		ByteBuf buf = Unpooled.buffer(8 + buffer.remaining());
 		buf.writeLong(status.id);
 		buf.writeBytes(buffer);
-		packet.getModifier().write(1, buf);
+		packet.getModifier().write(1, MinecraftReflection.getPacketDataSerializer(buf));
 		try {
 			protocolManager.sendServerPacket(status.player, packet);
 		} catch (InvocationTargetException e) {
@@ -80,15 +85,15 @@ public class MinecraftTunnel extends JavaPlugin implements PacketListener  {
 	}
 	
 	public void sendConnectFailed(Player player, String message, long tmpid) {
-		PacketContainer packet = protocolManager.createPacket(PacketType.Play.Client.CUSTOM_PAYLOAD);
+		PacketContainer packet = protocolManager.createPacket(PacketType.Play.Server.CUSTOM_PAYLOAD);
 		packet.getStrings().write(0, "tunnel-failed");
 		byte[] data = message.getBytes(StandardCharsets.UTF_8);
 		int length = data.length;
-		ByteBuf buf = (ByteBuf) MinecraftReflection.getPacketDataSerializer(8 + 4 + length);
+		ByteBuf buf = Unpooled.buffer(8 + 4 + length);
 		buf.writeLong(tmpid);
 		buf.writeInt(length);
 		buf.writeBytes(data);
-		packet.getModifier().write(1, buf);
+		packet.getModifier().write(1, MinecraftReflection.getPacketDataSerializer(buf));
 		try {
 			protocolManager.sendServerPacket(player, packet);
 		} catch (InvocationTargetException e) {
@@ -97,13 +102,12 @@ public class MinecraftTunnel extends JavaPlugin implements PacketListener  {
 	}
 
 	public void sendConnected(ConnectionStatus status, long tmpid) {
-		PacketContainer packet = protocolManager.createPacket(PacketType.Play.Client.CUSTOM_PAYLOAD);
-		packet.getStrings().write(0, "tunnel-success");
-		ByteBuf buf = (ByteBuf) MinecraftReflection.getPacketDataSerializer(8 + 8);
+		ByteBuf buf = Unpooled.buffer(8 + 8);
 		buf.writeLong(tmpid);
 		buf.writeLong(status.id);
-		packet.getModifier().write(1, buf);
 		try {
+			Object o = MinecraftReflection.getPacketDataSerializer(buf);
+			PacketContainer packet = protocolManager.createPacketConstructor(PacketType.Play.Server.CUSTOM_PAYLOAD, "tunnel-success", o).createPacket("tunnel-success", o);
 			protocolManager.sendServerPacket(status.player, packet);
 		} catch (InvocationTargetException e) {
 			e.printStackTrace();
@@ -142,10 +146,17 @@ public class MinecraftTunnel extends JavaPlugin implements PacketListener  {
 									 (data[4] & 0xFF) << 24 | (data[5] & 0xFF) << 16 | (data[6] & 0xFF) <<  8 | (data[7] & 0xFF) <<  0;
 						int port = (data[8] & 0xFF) << 8 | (data[9] & 0xFF) << 0; // 大端
 						manager.connect(event.getPlayer(), tmpid, ip, port);
+						break;
 					}
 					case "data": {
 						long id = buf.readLong();
 						manager.writeData(manager.getConnectionStatus(id), buf);
+						break;
+					}
+					case "close": {
+						long id = buf.readLong();
+						manager.closeConnection(manager.getConnectionStatus(id));
+						break;
 					}
 					}
 				}

@@ -33,57 +33,65 @@ public class ConnectionManager extends Thread {
 	
 	@Override
 	public void run() {
-		loop:
+		loop1:
 		while(true) {
 			try {
-				selector.selectedKeys().clear();
-				selector.selectNow();
-				for(SelectionKey key : selector.selectedKeys()) {
-					ConnectionStatus status = (ConnectionStatus) key.attachment();
-					if(!key.isValid() || !(status.readable || status.writable)) {
-						closeConnection(status);
-						continue;
-					}
-					if(key.isReadable() && status.readable) {
-						buffer.clear();
-						int length = ((ReadableByteChannel) key.channel()).read(buffer);
-						if(length == 0 && status.readable) {
-							tunnel.sendShutdownInput(status);
-							status.readable = false;
-						} else {
-							buffer.flip();
-							tunnel.sendData(status, buffer);
-						}
-					}
-					if(key.isWritable() && status.writable) {
-						byte[] data = status.outgoingData.poll();
-						if(data != null) {
-							buffer.clear();
-							buffer.put(data).flip();
-							WritableByteChannel channel = (WritableByteChannel) key.channel();
-							do {
-								if(channel.write(buffer) == 0) { // Not writable???
-									tunnel.sendShutdownOutput(status);
-									status.writable = false;
-									break;
-								}
-							} while(buffer.hasRemaining());
-						}
-					} else if(status.writable) {
-						tunnel.sendShutdownOutput(status);
-						status.writable = false;
-					}
-				}
-				Thread.sleep(1L);
+				runLoop();
 			} catch (InterruptedException e) {
-				break loop;
+				break loop1;
 			} catch(Throwable t) {
 				t.printStackTrace();
 			}
 		}
 	}
 
-	private void closeConnection(ConnectionStatus connectionStatus) {
+	private void runLoop() throws Throwable {
+		selector.selectedKeys().clear();
+		selector.selectNow();
+		loop2:
+		for(SelectionKey key : selector.selectedKeys()) {
+			ConnectionStatus status = (ConnectionStatus) key.attachment();
+			if(!(status.readable || status.writable))  {
+				closeConnection(status);
+			}
+			if(!key.isValid()) continue;
+			try {
+				if(key.isReadable() && status.readable) {
+					buffer.clear();
+					int length = ((ReadableByteChannel) key.channel()).read(buffer);
+					if(length <= 0 && status.readable) {
+						closeConnection(status);
+						continue loop2;
+					} else {
+						buffer.flip();
+						tunnel.sendData(status, buffer);
+					}
+				}
+				if(key.isWritable() && status.writable) {
+					byte[] data = status.outgoingData.poll();
+					if(data != null) {
+						buffer.clear();
+						buffer.put(data).flip();
+						WritableByteChannel channel = (WritableByteChannel) key.channel();
+						do {
+							if(channel.write(buffer) <= 0) { // Not writable???
+								closeConnection(status);
+								continue loop2;
+							}
+						} while(buffer.hasRemaining());
+					}
+				} else if(status.writable) {
+					tunnel.sendShutdownOutput(status);
+					status.writable = false;
+				}
+			} catch(IOException e) {
+				e.printStackTrace();
+				closeConnection(status);
+			}
+		}
+	}
+
+	public void closeConnection(ConnectionStatus connectionStatus) {
 		try {
 			connectionStatus.channel.close();
 		} catch(Throwable t) {
@@ -91,6 +99,7 @@ public class ConnectionManager extends Thread {
 		}
 		connections.remove(connectionStatus.id);
 		tunnel.sendCloseConnection(connectionStatus);
+		connectionStatus.channel.keyFor(selector).cancel();
 	}
 
 	public ConnectionStatus getConnectionStatus(long id) {
@@ -98,7 +107,7 @@ public class ConnectionManager extends Thread {
 	}
 
 	public void writeData(ConnectionStatus connectionStatus, ByteBuf buf) {
-		if(!connectionStatus.writable) return; // 不可写立即丢弃所有数据
+		if(connectionStatus == null || !connectionStatus.writable) return; // 不可写立即丢弃所有数据
 		byte[] data = new byte[buf.readableBytes()];
 		if(data.length != 0) {
 			buf.readBytes(data);
@@ -111,9 +120,9 @@ public class ConnectionManager extends Thread {
 			SocketChannel channel = SocketChannel.open(new InetSocketAddress(ip, port));
 			channel.configureBlocking(false);
 			channel.setOption(StandardSocketOptions.TCP_NODELAY, true);
-			channel.keyFor(selector);
 			long id = allocateNewConnectionID();
 			ConnectionStatus status = new ConnectionStatus(player, channel, id);
+			channel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, status);
 			connections.put(id, status);
 			tunnel.sendConnected(status, tmpid);
 		} catch (IOException e) {
